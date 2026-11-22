@@ -58,9 +58,9 @@
 > prompts came back correct.
 
 > [!WARNING]
-> **12 GB cards: keep the loop layers on the GPU.** Inkling-2-Mini Q4_K (16.5 GB) does not fit in 12 GB. With the default auto-fit, some experts of the loop layers (`blk.6`-`blk.17`, run 3x per token) land on the CPU, and any prompt longer than ~96 tokens comes out as all `?` (upstream [#32755](https://github.com/ggml-org/llama.cpp/issues/32755), [#32778](https://github.com/ggml-org/llama.cpp/issues/32778)). Tool calls then fail with `Unexpected empty grammar stack after accepting piece: ? (30)`. Upstream [#32777](https://github.com/ggml-org/llama.cpp/pull/32777) does not fix this on an RTX 5070 at 32K context: auto-fit still gives `?` output, at both the default and a 256 MiB `-fitt` margin.
+> **12 GB cards: keep the loop layers on the GPU.** Inkling-2-Mini Q4_K (16.5 GB) does not fit in 12 GB. Upstream, when experts of the loop layers (`blk.6`-`blk.17`, run 3x per token) are on the CPU, any prompt longer than ~96 tokens comes out as all `?` (upstream [#32755](https://github.com/ggml-org/llama.cpp/issues/32755), [#32778](https://github.com/ggml-org/llama.cpp/issues/32778)), and tool calls fail with `Unexpected empty grammar stack after accepting piece: ? (30)`. Cause: for large batches the scheduler offloads these CPU weights to the GPU (op offload), but it copies a weight only in the first split that uses it, so the later loop passes read a stale copy. `--no-op-offload` avoids it. This branch fixes it in `ggml-backend.cpp` (the weight is copied again in each split that uses it). Tested on an RTX 5070: auto-fit, `--n-cpu-moe 12` and loop experts on the CPU all give correct output now. Upstream [#32777](https://github.com/ggml-org/llama.cpp/pull/32777) alone does not fix it.
 >
-> Workaround: put every layer on the GPU and send only the experts of the single-pass layers to the CPU:
+> Loop experts on the CPU are still slow. For speed, put every layer on the GPU and send only the experts of the single-pass layers to the CPU:
 >
 > ```sh
 > llama-server -m Inkling-2-Mini-Q4_K.gguf --jinja -fa on -c 32768 -np 1 -ngl 99 \
