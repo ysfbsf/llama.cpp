@@ -57,6 +57,25 @@
 > They report that all 20,882 `test-backend-ops` cases pass, including the `INKLING2_*` ones, and that spot-check
 > prompts came back correct.
 
+> [!WARNING]
+> **12 GB cards: keep the loop layers on the GPU.** Inkling-2-Mini Q4_K (16.5 GB) does not fit in 12 GB. With the default auto-fit, some experts of the loop layers (`blk.6`-`blk.17`, run 3x per token) land on the CPU, and any prompt longer than ~96 tokens comes out as all `?` (upstream [#32755](https://github.com/ggml-org/llama.cpp/issues/32755), [#32778](https://github.com/ggml-org/llama.cpp/issues/32778)). Tool calls then fail with `Unexpected empty grammar stack after accepting piece: ? (30)`. Upstream [#32777](https://github.com/ggml-org/llama.cpp/pull/32777) does not fix this on an RTX 5070 at 32K context: auto-fit still gives `?` output, at both the default and a 256 MiB `-fitt` margin.
+>
+> Workaround: put every layer on the GPU and send only the experts of the single-pass layers to the CPU:
+>
+> ```sh
+> llama-server -m Inkling-2-Mini-Q4_K.gguf --jinja -fa on -c 32768 -np 1 -ngl 99 \
+>   -ot 'blk\.([0-5]|1[89]|2[0-3])\.ffn_.*_exps\.=CPU'
+> ```
+>
+> Do not use `-ngl 99` without `-ot`: the model overflows VRAM and runs at ~1 t/s. RTX 5070 12 GB, Ryzen 5 7600X, DDR5-6000, Q4_K, this command, real `llama-server` requests, tokens/s:
+>
+> | | prefill (~3.5K prompt) | decode |
+> |---|---:|---:|
+> | upstream b12620 | 119 | 36 |
+> | this fork | 132 | 43 |
+>
+> On this setup `-np 2` cut decode to ~23 t/s, and `-ub 2048` cut prefill to ~40 t/s.
+
 ![llama.cpp](https://raw.githubusercontent.com/ggml-org/llama-brand/refs/heads/master/logo/svg/cover/llama-cpp/cover-llama-cpp-dark.svg)
 
 <div align="center">
